@@ -1,84 +1,67 @@
 # Marshal Office Manager
 
-אפליקציית React המתחברת ישירות ל-Firebase Firestore — ללא שרת, ללא backend.
+אפליקציית React המתחברת ישירות ל-Firebase — ללא שרת, ללא backend.
 
-**🌐 Live:** `https://YOUR_USERNAME.github.io/marshal-office-manager/`
+**🌐 Live:** `https://yairchayra.github.io/marshal-office-manager/`
 
 ---
 
 ## הגדרה ראשונית (פעם אחת)
 
-### 1. Firebase — הכנסת פרטי הפרויקט
+### 1. Firebase config — `src/firebase.js`
+Firebase Console → הפרויקט → **Project Settings → General → Your apps → Config**
 
-לך ל-[Firebase Console](https://console.firebase.google.com) → הפרויקט שלך →
-**Project Settings → General → Your apps → SDK setup → Config**
-
-העתק את הערכים לתוך `src/firebase.js`:
-
-```js
-const firebaseConfig = {
-  apiKey:            "...",
-  authDomain:        "...",
-  projectId:         "...",
-  storageBucket:     "...",
-  messagingSenderId: "...",
-  appId:             "...",
-};
-```
-
-### 2. Firebase — Firestore Rules
-
-לך ל-Firestore → **Rules** והדבק:
-
+### 2. Firestore Rules
 ```
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
   }
 }
 ```
 
-> ⚠️ זה מאפשר גישה לכולם. האפליקציה מנהלת הרשאות בעצמה דרך login.
-> אחרי שהכל עובד, שקול להגביל לפי auth.
+### 3. Storage Rules
+```
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}
+```
 
-### 3. GitHub — הגדרת Pages
+### 4. הוספת משתמשים
+Firebase Console → **Authentication → Users → Add user**
+אחרי כן — לך ל-Firestore ובנה document ב-`user_profiles/{uid}`:
+```json
+{
+  "email": "user@example.com",
+  "displayName": "שם המשתמש",
+  "isAdmin": true
+}
+```
 
-1. לך ל-Settings → Pages
-2. **Source:** GitHub Actions
-3. לחץ Save
+### 5. GitHub Pages
+Settings → Pages → Source: **GitHub Actions**
 
-### 4. העלאה ל-GitHub
-
+### 6. העלאה ל-GitHub
 ```bash
-git init
 git add .
-git commit -m "Initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/marshal-office-manager.git
-git branch -M main
-git push -u origin main
+git commit -m "Switch to Firebase Auth"
+git push origin main
 ```
-
-אחרי כמה דקות האתר יהיה זמין בכתובת:
-`https://YOUR_USERNAME.github.io/marshal-office-manager/`
 
 ---
 
-## פיתוח מקומי
-
+## מיגרציה מ-PostgreSQL (פעם אחת)
 ```bash
+cd office-manager-firebase
 npm install
-npm run dev
+node migrate.js        # PCs, Desks, Settings
+node migrate-floor.js  # תמונת מפת הקומה → Storage
 ```
-
----
-
-## מיגרציה מ-PostgreSQL
-
-```bash
-# בתיקיית office-manager-firebase (מהשלב הקודם)
-node migrate.js
-```
-test

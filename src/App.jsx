@@ -5,34 +5,27 @@ import {
   getDesks, saveDesk, deleteDesk,
   getTableGroups, saveTableGroups,
   getFloorPlan, saveFloorPlan,
-  getAccounts, getAccountByEmail, createAccount, updateAccount, deleteAccount, updateAccountPassword,
+  getAccounts, updateUserProfile, registerNewUser,
+  loginUser, logoutUser,
 } from "./db.js";
+import { auth, onAuthStateChanged } from "./firebase.js";
 
-// ─── Auth helpers (browser-side SHA-256, same as original) ────────────────────
+// ─── PC password helpers (לסיסמאות Outlook של המחשבים — לא קשור ל-Auth) ──────
 async function sha256(text) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("");
 }
-export async function hashPassword(password) {
+async function hashPassword(password) {
   const salt = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, "0")).join("");
   return salt + ":" + await sha256(salt + password);
 }
-export async function verifyPassword(password, stored) {
+async function verifyPassword(password, stored) {
   if (!stored) return false;
   const [salt, hash] = stored.split(":");
   return await sha256(salt + password) === hash;
 }
 
-// ─── Session store (in-memory, localStorage for persistence) ─────────────────
-function loadSession() {
-  try { return JSON.parse(localStorage.getItem("om_session") || "null"); } catch { return null; }
-}
-function persistSession(s) {
-  if (s) localStorage.setItem("om_session", JSON.stringify(s));
-  else localStorage.removeItem("om_session");
-}
-
-// ─── Excel import (unchanged from original) ───────────────────────────────────
+// ─── Excel import ────────────────────────────────────────────────────────────
 async function importFromExcel(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -170,21 +163,13 @@ function LoginScreen({ onLogin, C }) {
     if (!email || !password) { setError("Please enter email and password"); return; }
     setLoading(true); setError("");
     try {
-      const account = await getAccountByEmail(email);
-      if (!account) { setError("Invalid email or password"); setLoading(false); return; }
-
-      // First-time ADMIN_SEED — set password now
-      if (account.passwordHash === "ADMIN_SEED") {
-        const hash = await hashPassword(password);
-        await updateAccountPassword(account.id, hash);
-        onLogin({ email: account.email, isAdmin: account.isAdmin, displayName: account.displayName });
-        setLoading(false); return;
-      }
-
-      const ok = await verifyPassword(password, account.passwordHash);
-      if (!ok) { setError("Invalid email or password"); setLoading(false); return; }
-      onLogin({ email: account.email, isAdmin: account.isAdmin, displayName: account.displayName });
-    } catch (e) { setError("Error: " + e.message); }
+      const userData = await loginUser(email, password);
+      onLogin(userData);
+    } catch (e) {
+      setError(e.code === "auth/invalid-credential" || e.code === "auth/wrong-password" || e.code === "auth/user-not-found"
+        ? "Invalid email or password"
+        : "Error: " + e.message);
+    }
     setLoading(false);
   };
 
@@ -209,79 +194,142 @@ function LoginScreen({ onLogin, C }) {
 }
 
 // ─── Admin Panel ──────────────────────────────────────────────────────────────
-function AdminPanel({ C }) {
+function AdminPanel({ session, onLogout, C }) {
   const [accounts, setAccounts] = useState([]);
-  const [form, setForm] = useState({ email: "", displayName: "", password: "", isAdmin: false });
   const [editId, setEditId] = useState(null);
+  const [editForm, setEditForm] = useState({ displayName: "", isAdmin: false });
+  const [showNew, setShowNew] = useState(false);
+  const [newForm, setNewForm] = useState({ email: "", displayName: "", password: "", isAdmin: false });
   const [msg, setMsg] = useState(null);
+  const [registering, setRegistering] = useState(false);
 
   const load = async () => { setAccounts(await getAccounts()); };
   useEffect(() => { load(); }, []);
 
-  const save = async () => {
+  const showMsg = (text, type = "success") => { setMsg({ text, type }); setTimeout(() => setMsg(null), 4000); };
+
+  const saveEdit = async () => {
     try {
-      if (editId) {
-        const update = { displayName: form.displayName, isAdmin: form.isAdmin };
-        if (form.password) update.passwordHash = await hashPassword(form.password);
-        await updateAccount(editId, update);
-      } else {
-        if (!form.email || !form.password) { setMsg({ text: "Email and password required", type: "error" }); return; }
-        await createAccount({ email: form.email, displayName: form.displayName, passwordHash: await hashPassword(form.password), isAdmin: form.isAdmin });
-      }
-      setMsg({ text: editId ? "Updated!" : "Account created!", type: "success" });
-      setForm({ email: "", displayName: "", password: "", isAdmin: false }); setEditId(null);
+      await updateUserProfile(editId, { displayName: editForm.displayName, isAdmin: editForm.isAdmin });
+      showMsg("✓ עודכן בהצלחה!");
+      setEditId(null);
       load();
-    } catch (e) { setMsg({ text: e.message, type: "error" }); }
-    setTimeout(() => setMsg(null), 3000);
+    } catch (e) { showMsg(e.message, "error"); }
   };
 
-  const del = async (id, email) => {
-    if (!confirm(`Delete account ${email}?`)) return;
-    await deleteAccount(id); load();
+  const handleRegister = async () => {
+    if (!newForm.email || !newForm.password) { showMsg("אימייל וסיסמה נדרשים", "error"); return; }
+    if (newForm.password.length < 6) { showMsg("סיסמה חייבת להיות לפחות 6 תווים", "error"); return; }
+    setRegistering(true);
+    try {
+      // שמור את פרטי האדמין לפני יצירת המשתמש
+      const adminEmail = session.email;
+      await registerNewUser(newForm.email, newForm.password, newForm.displayName, newForm.isAdmin);
+      showMsg(`✓ משתמש ${newForm.email} נוצר! מתחבר מחדש...`);
+      setNewForm({ email: "", displayName: "", password: "", isAdmin: false });
+      setShowNew(false);
+      load();
+      // Firebase מתנתק אוטומטית כשיוצרים משתמש — כופה התנתקות והתחברות מחדש
+      setTimeout(() => {
+        alert(`נוצר משתמש חדש!
+
+Firebase ניתק אותך אוטומטית.
+אנא התחבר מחדש עם:
+${adminEmail}`);
+        onLogout();
+      }, 1500);
+    } catch (e) { showMsg(e.message, "error"); }
+    setRegistering(false);
   };
+
+  const RoleButtons = ({ value, onChange }) => (
+    <div style={{ display: "flex", gap: 6 }}>
+      {["Viewer", "Admin"].map(role => (
+        <button key={role} onClick={() => onChange(role === "Admin")}
+          style={{ flex: 1, padding: "8px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700,
+            background: (role === "Admin") === value ? C.accent + "33" : C.bg,
+            color: (role === "Admin") === value ? C.accent : C.muted,
+            border: `1px solid ${(role === "Admin") === value ? C.accent : C.border}` }}>
+          {role === "Admin" ? "👑 Admin" : "👁 Viewer"}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
-    <div style={{ padding: "clamp(14px,2vw,28px)" }}>
-      <h3 style={{ color: C.text, margin: "0 0 20px", fontSize: "clamp(14px,1.8vw,18px)" }}>👥 User Accounts</h3>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: "hidden", marginBottom: 24 }}>
+    <div style={{ padding: "clamp(14px,2vw,28px)", maxWidth: 800 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 10 }}>
+        <h3 style={{ color: C.text, margin: 0, fontSize: "clamp(14px,1.8vw,18px)" }}>👥 ניהול משתמשים</h3>
+        <Btn onClick={() => { setShowNew(p => !p); setEditId(null); }} variant={showNew ? "neutral" : "success"} style={{ fontSize: 13 }}>
+          {showNew ? "✕ ביטול" : "➕ משתמש חדש"}
+        </Btn>
+      </div>
+
+      {/* הודעה */}
+      {msg && (
+        <div style={{ color: msg.type === "error" ? C.red : C.green, fontSize: 13, marginBottom: 16, padding: "10px 14px", background: (msg.type === "error" ? C.red : C.green) + "18", borderRadius: 8, border: `1px solid ${(msg.type === "error" ? C.red : C.green)}44` }}>
+          {msg.text}
+        </div>
+      )}
+
+      {/* טופס משתמש חדש */}
+      {showNew && (
+        <div style={{ background: C.card, border: `1px solid ${C.green}55`, borderRadius: 12, padding: "clamp(16px,2vw,24px)", marginBottom: 24 }}>
+          <div style={{ color: C.green, fontWeight: 700, fontSize: 14, marginBottom: 16 }}>➕ רישום משתמש חדש</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 12, marginBottom: 14 }}>
+            <InputField label="אימייל *" value={newForm.email} onChange={v => setNewForm(f => ({ ...f, email: v }))} type="email" placeholder="user@marshal-eng.co.il" C={C} />
+            <InputField label="שם תצוגה" value={newForm.displayName} onChange={v => setNewForm(f => ({ ...f, displayName: v }))} placeholder="ישראל ישראלי" C={C} />
+            <InputField label="סיסמה * (מינימום 6)" value={newForm.password} onChange={v => setNewForm(f => ({ ...f, password: v }))} type="password" C={C} />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", color: C.muted, fontSize: 11, textTransform: "uppercase", marginBottom: 8 }}>הרשאה</label>
+            <RoleButtons value={newForm.isAdmin} onChange={v => setNewForm(f => ({ ...f, isAdmin: v }))} />
+          </div>
+          <div style={{ background: C.yellow + "18", border: `1px solid ${C.yellow}44`, borderRadius: 8, padding: "8px 12px", marginBottom: 14, color: C.yellow, fontSize: 12 }}>
+            ⚠️ לאחר יצירת המשתמש תתנתק אוטומטית — תצטרך להתחבר מחדש.
+          </div>
+          <Btn onClick={handleRegister} variant="success" disabled={registering}>
+            {registering ? "⏳ יוצר משתמש..." : "✓ צור משתמש"}
+          </Btn>
+        </div>
+      )}
+
+      {/* רשימת משתמשים */}
+      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: "hidden" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 12, padding: "10px 16px", background: C.border + "44", color: C.muted, fontSize: 11, textTransform: "uppercase" }}>
-          <span>Email</span><span>Name</span><span>Role</span><span></span>
+          <span>אימייל</span><span>שם</span><span>הרשאה</span><span></span>
         </div>
         {accounts.map(acc => (
-          <div key={acc.id} style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 12, alignItems: "center", padding: "12px 16px", borderTop: `1px solid ${C.border}` }}>
-            <span style={{ color: C.text, fontSize: 13 }}>{acc.email}</span>
-            <span style={{ color: C.muted, fontSize: 13 }}>{acc.display_name}</span>
-            <Tag color={acc.is_admin ? C.accent : C.muted}>{acc.is_admin ? "Admin" : "Viewer"}</Tag>
-            <div style={{ display: "flex", gap: 6 }}>
-              <Btn onClick={() => { setEditId(acc.id); setForm({ email: acc.email, displayName: acc.display_name, password: "", isAdmin: acc.is_admin }); }} variant="primary" style={{ padding: "4px 10px", fontSize: 11 }}>Edit</Btn>
-              <Btn onClick={() => del(acc.id, acc.email)} variant="danger" style={{ padding: "4px 10px", fontSize: 11 }}>✕</Btn>
+          <div key={acc.id}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto auto", gap: 12, alignItems: "center", padding: "12px 16px", borderTop: `1px solid ${C.border}` }}>
+              <span style={{ color: C.text, fontSize: 13, wordBreak: "break-all" }}>{acc.email}</span>
+              <span style={{ color: C.muted, fontSize: 13 }}>{acc.display_name || "—"}</span>
+              <Tag color={acc.is_admin ? C.accent : C.muted}>{acc.is_admin ? "👑 Admin" : "👁 Viewer"}</Tag>
+              <Btn onClick={() => { setEditId(editId === acc.id ? null : acc.id); setShowNew(false); setEditForm({ displayName: acc.display_name || "", isAdmin: acc.is_admin }); }}
+                variant="primary" style={{ padding: "4px 10px", fontSize: 11 }}>✏️</Btn>
             </div>
+            {editId === acc.id && (
+              <div style={{ padding: "16px", background: C.bg, borderTop: `1px solid ${C.border}` }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12, marginBottom: 12 }}>
+                  <InputField label="שם תצוגה" value={editForm.displayName} onChange={v => setEditForm(f => ({ ...f, displayName: v }))} C={C} />
+                  <div>
+                    <label style={{ display: "block", color: C.muted, fontSize: 11, textTransform: "uppercase", marginBottom: 8 }}>הרשאה</label>
+                    <RoleButtons value={editForm.isAdmin} onChange={v => setEditForm(f => ({ ...f, isAdmin: v }))} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Btn onClick={saveEdit} variant="success">💾 שמור</Btn>
+                  <Btn onClick={() => setEditId(null)} variant="neutral">ביטול</Btn>
+                </div>
+              </div>
+            )}
           </div>
         ))}
-      </div>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "clamp(14px,2vw,22px)" }}>
-        <h4 style={{ color: C.accent, margin: "0 0 16px", fontSize: 14 }}>{editId ? "✏️ Edit Account" : "➕ New Account"}</h4>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-          <InputField label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} type="email" C={C} />
-          <InputField label="Display Name" value={form.displayName} onChange={v => setForm(f => ({ ...f, displayName: v }))} C={C} />
-          <InputField label={editId ? "New Password (blank = keep)" : "Password"} value={form.password} onChange={v => setForm(f => ({ ...f, password: v }))} type="password" C={C} />
-          <div style={{ marginBottom: 12 }}>
-            <label style={{ display: "block", color: C.muted, fontSize: 11, textTransform: "uppercase", marginBottom: 8 }}>Role</label>
-            <div style={{ display: "flex", gap: 8 }}>
-              {["Viewer", "Admin"].map(role => (
-                <button key={role} onClick={() => setForm(f => ({ ...f, isAdmin: role === "Admin" }))}
-                  style={{ flex: 1, padding: "9px", borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, background: (role === "Admin") === form.isAdmin ? C.accent + "33" : C.bg, color: (role === "Admin") === form.isAdmin ? C.accent : C.muted, border: `1px solid ${(role === "Admin") === form.isAdmin ? C.accent : C.border}` }}>
-                  {role}
-                </button>
-              ))}
-            </div>
+        {accounts.length === 0 && (
+          <div style={{ padding: "32px", textAlign: "center", color: C.muted, fontSize: 13 }}>
+            אין משתמשים עדיין
           </div>
-        </div>
-        {msg && <div style={{ color: msg.type === "error" ? C.red : C.green, fontSize: 12, marginBottom: 12, padding: "8px 12px", background: (msg.type === "error" ? C.red : C.green) + "18", borderRadius: 6 }}>{msg.text}</div>}
-        <div style={{ display: "flex", gap: 8 }}>
-          <Btn onClick={save} variant="success">{editId ? "💾 Update" : "➕ Create"}</Btn>
-          {editId && <Btn onClick={() => { setEditId(null); setForm({ email: "", displayName: "", password: "", isAdmin: false }); }} variant="neutral">Cancel</Btn>}
-        </div>
+        )}
       </div>
     </div>
   );
@@ -723,10 +771,24 @@ function FloorMapFull({ desks, pcs, onDeskClick, onAddDesk, editMode, floorImage
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const [session, setSession] = useState(loadSession);
+  const [session, setSession] = useState(null);
   const [themeKey, setThemeKey] = useState("dark");
   const C = THEMES[themeKey];
   const isAdmin = session?.isAdmin;
+
+  // שמור על session בין רענונים דרך Firebase Auth
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const { getUserProfile } = await import("./db.js");
+        const profile = await getUserProfile(user.uid);
+        setSession({ uid: user.uid, email: user.email, displayName: profile?.displayName || user.email, isAdmin: profile?.isAdmin || false });
+      } else {
+        setSession(null);
+      }
+    });
+    return unsub;
+  }, []);
 
   const [pcs, setPcs] = useState({});
   const [desks, setDesks] = useState([]);
@@ -757,10 +819,10 @@ export default function App() {
     setLoading(false);
   };
 
-  const handleLogin = (data) => { persistSession(data); setSession(data); };
+  const handleLogin = (data) => { setSession(data); };
   useEffect(() => { if (session) loadAll(); }, [session]);
 
-  const handleLogout = () => { persistSession(null); setSession(null); setPcs({}); setDesks([]); setFloorImage(null); setSelectedDesk(null); };
+  const handleLogout = async () => { await logoutUser(); setSession(null); setPcs({}); setDesks([]); setFloorImage(null); setSelectedDesk(null); };
 
   const handleImportExcel = async (e) => {
     const file = e.target.files[0]; if (!file) return;
@@ -951,7 +1013,7 @@ export default function App() {
             </div>
           )}
           {activeTab === "compare" && <div style={{ flex: 1, overflowY: "auto", padding: "clamp(14px,2vh,22px) clamp(14px,2vw,28px)" }}><ComparePCs pcs={pcs} C={C} /></div>}
-          {activeTab === "admin" && isAdmin && <div style={{ flex: 1, overflowY: "auto" }}><AdminPanel C={C} /></div>}
+          {activeTab === "admin" && isAdmin && <div style={{ flex: 1, overflowY: "auto" }}><AdminPanel session={session} onLogout={handleLogout} C={C} /></div>}
         </div>
 
         {/* Sidebar */}
