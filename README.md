@@ -81,3 +81,4 @@ npm run dev
 # בתיקיית office-manager-firebase (מהשלב הקודם)
 node migrate.js
 ```
+test
