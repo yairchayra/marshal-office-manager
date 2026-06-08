@@ -20,12 +20,12 @@ import {
 } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey:            "REPLACE_WITH_YOUR_API_KEY",
-  authDomain:        "REPLACE_WITH_YOUR_AUTH_DOMAIN",
-  projectId:         "REPLACE_WITH_YOUR_PROJECT_ID",
-  storageBucket:     "REPLACE_WITH_YOUR_STORAGE_BUCKET",
-  messagingSenderId: "REPLACE_WITH_YOUR_MESSAGING_SENDER_ID",
-  appId:             "REPLACE_WITH_YOUR_APP_ID",
+  apiKey: "AIzaSyBpHFm7wKA7tR25lemACFBEVVgdXyavGn4",
+  authDomain: "marshal-office-manager.firebaseapp.com",
+  projectId: "marshal-office-manager",
+  storageBucket: "marshal-office-manager.firebasestorage.app",
+  messagingSenderId: "747589186849",
+  appId: "1:747589186849:web:6737dfcd6eacf5c76dfa60"
 };
 
 const app = initializeApp(firebaseConfig);
