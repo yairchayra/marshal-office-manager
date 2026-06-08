@@ -1,3 +1,22 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+
+# Environment files — לעולם לא ב-GitHub!
 .env
+.env.local
+.env.*.local
+
+# Firebase service account — סיסמת שרת, אסור ב-GitHub!
+serviceAccountKey.json
+*serviceAccount*.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

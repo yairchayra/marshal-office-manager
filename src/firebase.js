@@ -1,6 +1,6 @@
 // src/firebase.js
-// הכנס כאן את פרטי הפרויקט שלך מ-Firebase Console:
-// Project Settings → General → Your apps → Firebase SDK snippet → Config
+// הערכים נטענים מ-.env.local (לא עולה ל-GitHub)
+// ראה .env.local.example להוראות הגדרה
 import { initializeApp } from "firebase/app";
 import {
   getFirestore,
@@ -28,13 +28,18 @@ import {
 } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBpHFm7wKA7tR25lemACFBEVVgdXyavGn4",
-  authDomain: "marshal-office-manager.firebaseapp.com",
-  projectId: "marshal-office-manager",
-  storageBucket: "marshal-office-manager.firebasestorage.app",
-  messagingSenderId: "747589186849",
-  appId: "1:747589186849:web:6737dfcd6eacf5c76dfa60"
+  apiKey:            import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain:        import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId:         import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket:     import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId:             import.meta.env.VITE_FIREBASE_APP_ID,
 };
+
+// בדיקה שהערכים הוגדרו
+if (!firebaseConfig.apiKey || firebaseConfig.apiKey === "undefined") {
+  console.error("⚠️ Firebase config חסר! וודא שקובץ .env.local קיים עם הערכים הנכונים.");
+}
 
 const app     = initializeApp(firebaseConfig);
 const db      = getFirestore(app);
