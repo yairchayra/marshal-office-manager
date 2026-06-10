@@ -840,7 +840,7 @@ function SwapModal({ pc, pcs, onSave, onCancel, C }) {
 // ─── Table Groups ─────────────────────────────────────────────────────────────
 const TABLE_COLORS=["#6aa3fc","#5de89a","#fc6b6b","#fde96a","#fbb360","#c084fc","#38bdf8","#f472b6","#a3e635","#fb923c"];
 
-function TableGroupView({ desks, pcs, tableGroups, onSelectDesk, onGroupsChange, onAskConfirm, isAdmin, C }) {
+function TableGroupView({ desks, pcs, tableGroups, isMobile, onSelectDesk, onGroupsChange, onAskConfirm, isAdmin, C }) {
   const [editingGroup,setEditingGroup]=useState(null);const [showAdd,setShowAdd]=useState(false);
   const [newName,setNewName]=useState("");const [newColor,setNewColor]=useState(TABLE_COLORS[0]);
   const [collapsed,setCollapsed]=useState(()=>Object.fromEntries((tableGroups||[]).map(g=>[g.name,true])));
@@ -904,7 +904,7 @@ function TableGroupView({ desks, pcs, tableGroups, onSelectDesk, onGroupsChange,
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:8,padding:"0 16px 16px"}}>
                 {gd.map(desk=>{const pc=desk.pcId?pcs[desk.pcId]:null;return(
                   <div key={desk.id} onClick={()=>onSelectDesk(desk)} style={{background:C.bg,border:`1.5px solid ${pc?group.color+"88":C.border}`,borderRadius:8,padding:"10px 12px",cursor:"pointer"}}>
-                    <div style={{color:group.color,fontSize:10,fontWeight:700,marginBottom:4}}>שולחן {desk.label}</div>
+                    <div style={{color:group.color,fontSize:10,fontWeight:700,marginBottom:4}}>שולחן {desk.label}{isMobile&&pc?" 👁️":""}</div>
                     {pc?<><div style={{color:C.text,fontSize:13,fontWeight:700}}>{pc.userName}</div><div style={{color:C.muted,fontSize:11}}>{pc.pcId}</div></>:<div style={{color:C.dim,fontSize:12}}>ריק</div>}
                   </div>
                 );})}
@@ -1089,7 +1089,7 @@ export default function App() {
               <div style={{flex:1,minHeight:0}}><FloorMapFull desks={desks} pcs={pcs} onDeskClick={handleDeskClick} onAddDesk={handleAddDesk} editMode={editMode&&isAdmin} floorImage={floorImage} C={C}/></div>
             </div>
           )}
-          {activeTab==="tables"&&<div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}><TableGroupView desks={desks} pcs={pcs} tableGroups={tableGroups} onSelectDesk={d=>{setSelectedDesk(d);setActiveTab("map");}} onGroupsChange={handleGroupsChange} onAskConfirm={askConfirm} isAdmin={isAdmin} C={C}/></div>}
+          {activeTab==="tables"&&<div style={{flex:1,overflowY:"auto",padding:`clamp(14px,2vh,22px) clamp(14px,2vw,28px) ${isMobile?"80px":"22px"}`}}><TableGroupView desks={desks} pcs={pcs} tableGroups={tableGroups} isMobile={isMobile} onSelectDesk={d=>{setSelectedDesk(d); if(!isMobile) setActiveTab("map");}} onGroupsChange={handleGroupsChange} onAskConfirm={askConfirm} isAdmin={isAdmin} C={C}/></div>}
           {activeTab==="list"&&(
             <div style={{flex:1,overflowY:"auto",padding:`clamp(14px,2vh,22px) clamp(14px,2vw,28px) ${isMobile?"80px":"22px"}`}}>
               {/* Search + Sort */}
@@ -1124,9 +1124,9 @@ export default function App() {
               </div>
             </div>
           )}
-          {activeTab==="software"&&<div style={{flex:1,overflowY:"auto"}}><SoftwareManager softwares={softwares} pcs={pcs} onSave={handleSaveSoftware} onDelete={handleDeleteSoftware} isAdmin={isAdmin} C={C}/></div>}
-          {activeTab==="report"&&<div style={{flex:1,overflowY:"auto"}}><CostReport pcs={pcs} softwares={softwares} isMobile={isMobile} C={C}/></div>}
-          {activeTab==="admin"&&isAdmin&&<div style={{flex:1,overflowY:"auto"}}><AdminPanel session={session} onLogout={handleLogout} C={C}/></div>}
+          {activeTab==="software"&&<div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?"80px":0}}><SoftwareManager softwares={softwares} pcs={pcs} onSave={handleSaveSoftware} onDelete={handleDeleteSoftware} isAdmin={isAdmin} C={C}/></div>}
+          {activeTab==="report"&&<div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?"80px":0}}><CostReport pcs={pcs} softwares={softwares} isMobile={isMobile} C={C}/></div>}
+          {activeTab==="admin"&&isAdmin&&<div style={{flex:1,overflowY:"auto",paddingBottom:isMobile?"80px":0}}><AdminPanel session={session} onLogout={handleLogout} C={C}/></div>}
         </div>
 
         {/* Sidebar — desktop: panel lateral, mobile: full overlay */}
