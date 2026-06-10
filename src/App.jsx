@@ -75,6 +75,23 @@ const Modal = ({ children, onClose, C }) => (
   </div>
 );
 
+// ─── Confirm Dialog ──────────────────────────────────────────────────────────
+function ConfirmDialog({ title, message, onConfirm, onCancel, C }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#0009", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200, padding:20 }}>
+      <div style={{ background:C.panel, border:`1px solid ${C.red}55`, borderRadius:14, padding:"clamp(24px,3vw,36px)", width:"min(400px,100%)", boxShadow:C.shadow }}>
+        <div style={{ fontSize:36, textAlign:"center", marginBottom:12 }}>⚠️</div>
+        <div style={{ color:C.text, fontWeight:800, fontSize:16, textAlign:"center", marginBottom:8 }}>{title}</div>
+        {message && <div style={{ color:C.muted, fontSize:13, textAlign:"center", marginBottom:24 }}>{message}</div>}
+        <div style={{ display:"flex", gap:10, justifyContent:"center" }}>
+          <Btn onClick={onConfirm} variant="danger" style={{ minWidth:100 }}>🗑️ מחק</Btn>
+          <Btn onClick={onCancel} variant="neutral" style={{ minWidth:100 }}>ביטול</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── License type badge ───────────────────────────────────────────────────────
 function LicenseTag({ sw, C }) {
   if (sw.licenseType === "annual")   return <Tag color={C.accent2}>שנתי 🔄</Tag>;
@@ -330,14 +347,19 @@ function SoftwareForm({ initial, onSave, onCancel, C }) {
 }
 
 // ─── Software Manager ─────────────────────────────────────────────────────────
-function SoftwareManager({ softwares, onSave, onDelete, isAdmin, C }) {
+function SoftwareManager({ softwares, pcs, onSave, onDelete, isAdmin, C }) {
   const [editSw,setEditSw]=useState(null);
   const [showForm,setShowForm]=useState(false);
+  const [expandedSw,setExpandedSw]=useState(null);
+  const [confirmDelete,setConfirmDelete]=useState(null);
 
   const openNew=()=>{ setEditSw(null); setShowForm(true); };
   const openEdit=(sw)=>{ setEditSw(sw); setShowForm(true); };
   const cancel=()=>{ setShowForm(false); setEditSw(null); };
   const handleSave=async(form)=>{ await onSave({...form,id:editSw?.id||null}); cancel(); };
+
+  // מחשבים שמשתמשים בתוכנה
+  const getPCsUsing=(swId)=>Object.values(pcs).filter(pc=>(pc.softwareIds||[]).includes(swId));
 
   const byCompany = softwares.reduce((acc,s)=>{ (acc[s.companyName]=acc[s.companyName]||[]).push(s); return acc; },{});
 
@@ -364,31 +386,73 @@ function SoftwareManager({ softwares, onSave, onDelete, isAdmin, C }) {
       {Object.entries(byCompany).map(([company,sws])=>(
         <div key={company} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, marginBottom:14, overflow:"hidden" }}>
           <div style={{ padding:"12px 18px", background:C.border+"33", color:C.accent, fontWeight:700, fontSize:14 }}>🏢 {company}</div>
-          {sws.map(sw=>(
-            <div key={sw.id} style={{ padding:"12px 18px", borderTop:`1px solid ${C.border}`, display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
-              <div style={{ flex:1 }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
-                  <span style={{ color:C.text, fontWeight:700, fontSize:14 }}>{sw.softwareName}</span>
-                  <LicenseTag sw={sw} C={C}/>
-                  <span style={{ color:C.accent, fontWeight:700, fontSize:13 }}>₪{sw.price?.toLocaleString()}{sw.licenseType==="monthly"?"/חודש":sw.licenseType==="annual"?"/שנה":""}</span>
-                  {sw.licenseType==="monthly" && <span style={{ color:C.yellow, fontSize:12 }}>= ₪{calcAnnualCost(sw).toLocaleString()}/שנה</span>}
-                  {sw.expiryDate && <Tag color={C.yellow}>פג: {sw.expiryDate}</Tag>}
+          {sws.map(sw=>{
+            const usingPCs = getPCsUsing(sw.id);
+            const isExpanded = expandedSw === sw.id;
+            return (
+              <div key={sw.id} style={{ borderTop:`1px solid ${C.border}` }}>
+                <div style={{ padding:"12px 18px", display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                      <span style={{ color:C.text, fontWeight:700, fontSize:14 }}>{sw.softwareName}</span>
+                      <LicenseTag sw={sw} C={C}/>
+                      <span style={{ color:C.accent, fontWeight:700, fontSize:13 }}>₪{sw.price?.toLocaleString()}{sw.licenseType==="monthly"?"/חודש":sw.licenseType==="annual"?"/שנה":""}</span>
+                      {sw.licenseType==="monthly" && <span style={{ color:C.yellow, fontSize:12 }}>= ₪{calcAnnualCost(sw).toLocaleString()}/שנה</span>}
+                      {sw.expiryDate && <Tag color={C.yellow}>פג: {sw.expiryDate}</Tag>}
+                    </div>
+                    <div style={{ display:"flex", gap:12, marginTop:4, flexWrap:"wrap", alignItems:"center" }}>
+                      {sw.productKey && <span style={{ color:C.muted, fontSize:11, fontFamily:"monospace" }}>🔑 {sw.productKey}</span>}
+                      {sw.invoice    && <span style={{ color:C.muted, fontSize:11 }}>📄 {sw.invoice}</span>}
+                      {/* כפתור מחשבים */}
+                      <button onClick={()=>setExpandedSw(isExpanded?null:sw.id)}
+                        style={{ background:usingPCs.length>0?C.green+"22":C.dim+"22", border:`1px solid ${usingPCs.length>0?C.green+"55":C.border}`, borderRadius:6, padding:"3px 10px", color:usingPCs.length>0?C.green:C.dim, fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>
+                        🖥️ {usingPCs.length} מחשבים {isExpanded?"▲":"▼"}
+                      </button>
+                    </div>
+                  </div>
+                  {isAdmin && (
+                    <div style={{ display:"flex", gap:6 }}>
+                      <Btn onClick={()=>openEdit(sw)} variant="primary" style={{ padding:"5px 10px", fontSize:11 }}>✏️</Btn>
+                      <Btn onClick={()=>setConfirmDelete({id:sw.id,name:sw.softwareName,count:usingPCs.length})} variant="danger" style={{ padding:"5px 10px", fontSize:11 }}>🗑️</Btn>
+                    </div>
+                  )}
                 </div>
-                <div style={{ display:"flex", gap:12, marginTop:4, flexWrap:"wrap" }}>
-                  {sw.productKey && <span style={{ color:C.muted, fontSize:11, fontFamily:"monospace" }}>🔑 {sw.productKey}</span>}
-                  {sw.invoice    && <span style={{ color:C.muted, fontSize:11 }}>📄 {sw.invoice}</span>}
-                </div>
+                {/* רשימת מחשבים שמשתמשים בתוכנה */}
+                {isExpanded && (
+                  <div style={{ padding:"0 18px 14px", borderTop:`1px solid ${C.border+"66"}` }}>
+                    {usingPCs.length===0 ? (
+                      <div style={{ color:C.dim, fontSize:12, padding:"10px 0" }}>אין מחשבים שמשתמשים בתוכנה זו</div>
+                    ) : (
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:8, paddingTop:10 }}>
+                        {usingPCs.map(pc=>(
+                          <div key={pc.pcId} style={{ background:C.bg, border:`1px solid ${C.green}44`, borderRadius:8, padding:"8px 12px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                            <div>
+                              <div style={{ color:C.text, fontSize:12, fontWeight:700 }}>{pc.userName||"לא מוקצה"}</div>
+                              <div style={{ color:C.muted, fontSize:11, fontFamily:"monospace" }}>{pc.pcId}</div>
+                            </div>
+                            {pc.userMail && <span style={{ color:C.dim, fontSize:10 }}>✉</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-              {isAdmin && (
-                <div style={{ display:"flex", gap:6 }}>
-                  <Btn onClick={()=>openEdit(sw)} variant="primary" style={{ padding:"5px 10px", fontSize:11 }}>✏️</Btn>
-                  <Btn onClick={()=>{ if(confirm(`למחוק "${sw.softwareName}"?`)) onDelete(sw.id); }} variant="danger" style={{ padding:"5px 10px", fontSize:11 }}>🗑️</Btn>
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       ))}
+
+      {/* Confirm Delete Dialog */}
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`למחוק "${confirmDelete.name}"?`}
+          message={confirmDelete.count>0 ? `התוכנה מותקנת על ${confirmDelete.count} מחשבים — היא תוסר מכולם.` : "פעולה זו אינה ניתנת לביטול."}
+          onConfirm={()=>{ onDelete(confirmDelete.id); setConfirmDelete(null); }}
+          onCancel={()=>setConfirmDelete(null)}
+          C={C}
+        />
+      )}
     </div>
   );
 }
@@ -591,12 +655,12 @@ function SwapModal({ pc, pcs, onSave, onCancel, C }) {
 // ─── Table Groups ─────────────────────────────────────────────────────────────
 const TABLE_COLORS=["#6aa3fc","#5de89a","#fc6b6b","#fde96a","#fbb360","#c084fc","#38bdf8","#f472b6","#a3e635","#fb923c"];
 
-function TableGroupView({ desks, pcs, tableGroups, onSelectDesk, onGroupsChange, isAdmin, C }) {
+function TableGroupView({ desks, pcs, tableGroups, onSelectDesk, onGroupsChange, onAskConfirm, isAdmin, C }) {
   const [editingGroup,setEditingGroup]=useState(null);const [showAdd,setShowAdd]=useState(false);
   const [newName,setNewName]=useState("");const [newColor,setNewColor]=useState(TABLE_COLORS[0]);
   const saveNew=async()=>{ if(!newName.trim())return; await onGroupsChange([...tableGroups,{name:newName.trim(),color:newColor}]); setNewName("");setNewColor(TABLE_COLORS[0]);setShowAdd(false); };
   const saveEdit=async()=>{ await onGroupsChange(tableGroups.map(g=>g.name===editingGroup.original?{name:editingGroup.name,color:editingGroup.color}:g)); setEditingGroup(null); };
-  const delGroup=async(name)=>{ if(!confirm(`למחוק "${name}"?`))return; await onGroupsChange(tableGroups.filter(g=>g.name!==name)); };
+  const delGroup=(name)=>{ onAskConfirm(`למחוק קבוצה "${name}"?`,`השולחנות בקבוצה יאבדו את הצבע.`,async()=>{ await onGroupsChange(tableGroups.filter(g=>g.name!==name)); }); };
   const CP=({selected,onSelect})=>(
     <div style={{display:"flex",gap:6,flexWrap:"wrap",marginTop:8}}>
       {TABLE_COLORS.map(c=><button key={c} onClick={()=>onSelect(c)} style={{width:24,height:24,borderRadius:"50%",background:c,border:selected===c?"3px solid white":"2px solid transparent",cursor:"pointer",transform:selected===c?"scale(1.2)":"scale(1)",transition:"all .15s"}}/>)}
@@ -768,7 +832,8 @@ export default function App() {
   const [desks,setDesks]=useState([]); const [tableGroups,setTableGroups]=useState([]);
   const [floorImage,setFloorImage]=useState(null); const [selectedDesk,setSelectedDesk]=useState(null);
   const [editMode,setEditMode]=useState(false); const [activeTab,setActiveTab]=useState("map");
-  const [modal,setModal]=useState(null); const [toast,setToast]=useState(null); const [loading,setLoading]=useState(false);
+  const [modal,setModal]=useState(null); const [toast,setToast]=useState(null); const [loading,setLoading]=useState(false); const [confirmDlg,setConfirmDlg]=useState(null);
+  const askConfirm=(title,message,onConfirm)=>setConfirmDlg({title,message,onConfirm});
 
   const showToast=(msg,type="success")=>{ setToast({msg,type}); setTimeout(()=>setToast(null),4000); };
 
@@ -794,9 +859,9 @@ export default function App() {
   const handleDeskClick=(desk,isPos)=>{ if(isPos){setDesks(ds=>ds.map(d=>d.id===desk.id?{...d,x:desk.x,y:desk.y}:d));saveDesk(desk);return;} if(editMode)setModal({type:"editDesk",data:desk});else setSelectedDesk(desk); };
   const handleAddDesk=({x,y})=>{ const fg=tableGroups[0]; setModal({type:"editDesk",data:{id:`desk-${Date.now()}`,x,y,pcId:null,label:`D${desks.length+1}`,tableGroup:fg?.name||"",color:fg?.color||"#6aa3fc"},isNew:true}); };
   const saveDeskModal=async(updated)=>{ const g=tableGroups.find(g=>g.name===updated.tableGroup); const wc={...updated,color:g?.color||"#6aa3fc"}; const desk=modal.isNew?{...modal.data,...wc}:{...desks.find(d=>d.id===modal.data.id),...wc}; if(modal.isNew){setDesks(ds=>[...ds,desk]);await saveDesk(desk);}else{setDesks(ds=>ds.map(d=>d.id===desk.id?desk:d));await saveDesk(desk);} setModal(null); };
-  const handleDeleteDesk=async()=>{ setDesks(ds=>ds.filter(d=>d.id!==modal.data.id)); await deleteDesk(modal.data.id); setSelectedDesk(null); setModal(null); };
+  const handleDeleteDesk=()=>{ askConfirm(`למחוק שולחן "${modal.data.label}"?`,"השולחן יוסר מהמפה.",async()=>{ setDesks(ds=>ds.filter(d=>d.id!==modal.data.id)); await deleteDesk(modal.data.id); setSelectedDesk(null); setModal(null); setConfirmDlg(null); }); };
   const handleSavePC=async(pc)=>{ await savePC(pc); setPcs(p=>({...p,[pc.pcId]:pc})); setModal(null); showToast(`✓ ${pc.pcId} נשמר`); };
-  const handleDeletePC=async(pcId)=>{ setPcs(p=>{const n={...p};delete n[pcId];return n;}); setDesks(ds=>ds.map(d=>d.pcId===pcId?{...d,pcId:null}:d)); await deletePC(pcId); setSelectedDesk(null); };
+  const handleDeletePC=(pcId,pcName)=>{ askConfirm(`למחוק את המחשב "${pcName||pcId}"?`,"כל הנתונים של המחשב יימחקו לצמיתות.",async()=>{ setPcs(p=>{const n={...p};delete n[pcId];return n;}); setDesks(ds=>ds.map(d=>d.pcId===pcId?{...d,pcId:null}:d)); await deletePC(pcId); setSelectedDesk(null); setConfirmDlg(null); }); };
   const handleSwap=async(pc,newUserName)=>{ setPcs(p=>({...p,[pc.pcId]:{...p[pc.pcId],userName:newUserName}})); setModal(null); showToast(`✓ הועבר ל-${newUserName}`); };
   const handleSaveSoftware=async(sw)=>{ await saveSoftware(sw); setSoftwares(await getSoftwares()); showToast("✓ תוכנה נשמרה"); };
   const handleDeleteSoftware=async(id)=>{ await deleteSoftware(id); setSoftwares(await getSoftwares()); setPcs(await getPCs()); showToast("✓ תוכנה נמחקה"); };
@@ -863,7 +928,7 @@ export default function App() {
               <div style={{flex:1,minHeight:0}}><FloorMapFull desks={desks} pcs={pcs} onDeskClick={handleDeskClick} onAddDesk={handleAddDesk} editMode={editMode&&isAdmin} floorImage={floorImage} C={C}/></div>
             </div>
           )}
-          {activeTab==="tables"&&<div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}><TableGroupView desks={desks} pcs={pcs} tableGroups={tableGroups} onSelectDesk={d=>{setSelectedDesk(d);setActiveTab("map");}} onGroupsChange={handleGroupsChange} isAdmin={isAdmin} C={C}/></div>}
+          {activeTab==="tables"&&<div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}><TableGroupView desks={desks} pcs={pcs} tableGroups={tableGroups} onSelectDesk={d=>{setSelectedDesk(d);setActiveTab("map");}} onGroupsChange={handleGroupsChange} onAskConfirm={askConfirm} isAdmin={isAdmin} C={C}/></div>}
           {activeTab==="list"&&(
             <div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}>
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>
@@ -886,7 +951,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {activeTab==="software"&&<div style={{flex:1,overflowY:"auto"}}><SoftwareManager softwares={softwares} onSave={handleSaveSoftware} onDelete={handleDeleteSoftware} isAdmin={isAdmin} C={C}/></div>}
+          {activeTab==="software"&&<div style={{flex:1,overflowY:"auto"}}><SoftwareManager softwares={softwares} pcs={pcs} onSave={handleSaveSoftware} onDelete={handleDeleteSoftware} isAdmin={isAdmin} C={C}/></div>}
           {activeTab==="report"&&<div style={{flex:1,overflowY:"auto"}}><CostReport pcs={pcs} softwares={softwares} C={C}/></div>}
           {activeTab==="compare"&&<div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}><ComparePCs pcs={pcs} softwares={softwares} C={C}/></div>}
           {activeTab==="admin"&&isAdmin&&<div style={{flex:1,overflowY:"auto"}}><AdminPanel session={session} onLogout={handleLogout} C={C}/></div>}
@@ -903,7 +968,7 @@ export default function App() {
               {selectedPC?(
                 <PCDetail pc={selectedPC} softwares={softwares} isAdmin={isAdmin} C={C}
                   onEdit={()=>setModal({type:"editPC",data:selectedPC})}
-                  onDelete={()=>handleDeletePC(selectedPC.pcId)}
+                  onDelete={()=>handleDeletePC(selectedPC.pcId,selectedPC.userName)}
                   onSwap={()=>setModal({type:"swap",data:selectedPC})}/>
               ):(
                 <div style={{background:C.card,borderRadius:12,padding:"clamp(20px,3vh,36px)",textAlign:"center",border:`1px solid ${C.border}`}}>
@@ -925,6 +990,8 @@ export default function App() {
           {modal.type==="swap"&&<SwapModal pc={modal.data} pcs={pcs} onSave={name=>handleSwap(modal.data,name)} onCancel={()=>setModal(null)} C={C}/>}
         </Modal>
       )}
+      {/* Confirm Delete Dialog */}
+      {confirmDlg&&<ConfirmDialog title={confirmDlg.title} message={confirmDlg.message} onConfirm={confirmDlg.onConfirm} onCancel={()=>setConfirmDlg(null)} C={C}/>}
     </div>
   );
 }
