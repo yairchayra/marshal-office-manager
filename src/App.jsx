@@ -9,6 +9,7 @@ import {
   getAccounts, updateUserProfile, registerNewUser,
   loginUser, logoutUser, getUserProfile,
   getCostReport,
+  getInvoices, uploadInvoice, deleteInvoice,
 } from "./db.js";
 import { auth, onAuthStateChanged } from "./firebase.js";
 
@@ -255,9 +256,96 @@ function PCDetail({ pc, softwares, onEdit, onDelete, onSwap, isAdmin, C }) {
   );
 }
 
+// ─── Invoice Manager ─────────────────────────────────────────────────────────
+function InvoiceManager({ softwareId, softwareName, onClose, isAdmin, C }) {
+  const [invoices,setInvoices]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [uploading,setUploading]=useState(false);
+  const [confirmDel,setConfirmDel]=useState(null);
+
+  const load=async()=>{ setLoading(true); setInvoices(await getInvoices(softwareId)); setLoading(false); };
+  useEffect(()=>{ load(); },[softwareId]);
+
+  const handleUpload=async(e)=>{
+    const files=[...e.target.files]; if(!files.length)return;
+    setUploading(true);
+    for(const file of files){ await uploadInvoice(softwareId,file); }
+    await load();
+    setUploading(false);
+    e.target.value="";
+  };
+
+  const handleDelete=async(filePath,fileName)=>{
+    setConfirmDel({filePath,fileName});
+  };
+
+  const ext=(name)=>name.split(".").pop().toLowerCase();
+  const isImg=(name)=>["jpg","jpeg","png","gif","webp"].includes(ext(name));
+  const isPdf=(name)=>ext(name)==="pdf";
+
+  return (
+    <div style={{background:C.card,borderRadius:14,padding:"clamp(18px,3vw,28px)",minWidth:300}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+        <div>
+          <div style={{color:C.text,fontWeight:800,fontSize:16}}>📄 חשבוניות</div>
+          <div style={{color:C.muted,fontSize:12}}>{softwareName}</div>
+        </div>
+        <button onClick={onClose} style={{background:C.dim+"33",border:"none",color:C.muted,cursor:"pointer",fontSize:18,width:32,height:32,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+      </div>
+
+      {isAdmin && (
+        <label style={{display:"flex",alignItems:"center",gap:10,background:C.accent+"18",border:`2px dashed ${C.accent}55`,borderRadius:10,padding:"clamp(12px,2vw,18px)",cursor:"pointer",marginBottom:18,justifyContent:"center"}}>
+          <span style={{fontSize:24}}>📎</span>
+          <div>
+            <div style={{color:C.accent,fontWeight:700,fontSize:13}}>{uploading?"מעלה...":"העלה חשבוניות"}</div>
+            <div style={{color:C.muted,fontSize:11}}>PDF, תמונות — ניתן לבחור מספר קבצים</div>
+          </div>
+          <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.gif,.webp" onChange={handleUpload} disabled={uploading} style={{display:"none"}}/>
+        </label>
+      )}
+
+      {loading && <div style={{color:C.muted,fontSize:13,textAlign:"center",padding:20}}>טוען...</div>}
+
+      {!loading && invoices.length===0 && (
+        <div style={{color:C.dim,fontSize:13,textAlign:"center",padding:"20px 0"}}>אין חשבוניות מצורפות</div>
+      )}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {invoices.map(inv=>(
+          <div key={inv.path} style={{background:C.bg,border:`1px solid ${C.border}`,borderRadius:8,padding:"10px 14px",display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:20}}>{isImg(inv.name)?"🖼️":isPdf(inv.name)?"📄":"📎"}</span>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{color:C.text,fontSize:12,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{inv.name}</div>
+            </div>
+            <div style={{display:"flex",gap:6,flexShrink:0}}>
+              <a href={inv.url} target="_blank" rel="noreferrer"
+                style={{background:C.accent+"22",color:C.accent,border:`1px solid ${C.accent}55`,borderRadius:6,padding:"4px 10px",fontSize:11,fontWeight:700,textDecoration:"none"}}>
+                👁️ פתח
+              </a>
+              {isAdmin && (
+                <Btn onClick={()=>handleDelete(inv.path,inv.name)} variant="danger" style={{padding:"4px 10px",fontSize:11}}>🗑️</Btn>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {confirmDel && (
+        <ConfirmDialog
+          title={`למחוק "${confirmDel.fileName}"?`}
+          message="הקובץ יימחק לצמיתות מהשרת."
+          onConfirm={async()=>{ await deleteInvoice(confirmDel.filePath); setConfirmDel(null); load(); }}
+          onCancel={()=>setConfirmDel(null)}
+          C={C}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Software Form ────────────────────────────────────────────────────────────
 function SoftwareForm({ initial, onSave, onCancel, C }) {
-  const blank = { companyName:"", softwareName:"", licenseType:"permanent", expiryDate:"", months:12, price:"", invoice:"", productKey:"" };
+  const blank = { companyName:"", softwareName:"", licenseType:"permanent", expiryDate:"", months:12, price:"", productKey:"" };
   const [form,setForm]=useState(initial?{...blank,...initial,months:initial.months||12}:blank);
   const [saving,setSaving]=useState(false);
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
@@ -298,7 +386,7 @@ function SoftwareForm({ initial, onSave, onCancel, C }) {
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))", gap:10 }}>
         <InputField label="שם חברה *" value={form.companyName} onChange={v=>set("companyName",v)} C={C} />
         <InputField label="שם תוכנה *" value={form.softwareName} onChange={v=>set("softwareName",v)} C={C} />
-        <InputField label="חשבונית (אופציונלי)" value={form.invoice} onChange={v=>set("invoice",v)} C={C} />
+
         <InputField label="מפתח מוצר (אופציונלי)" value={form.productKey} onChange={v=>set("productKey",v)} C={C} />
       </div>
 
@@ -352,6 +440,17 @@ function SoftwareManager({ softwares, pcs, onSave, onDelete, isAdmin, C }) {
   const [showForm,setShowForm]=useState(false);
   const [expandedSw,setExpandedSw]=useState(null);
   const [confirmDelete,setConfirmDelete]=useState(null);
+  const [invoiceView,setInvoiceView]=useState(null);
+  const [invoiceCounts,setInvoiceCounts]=useState({});
+
+  // טען ספירת חשבוניות לכל תוכנה
+  useEffect(()=>{
+    if(!softwares.length)return;
+    Promise.all(softwares.map(async sw=>{
+      const inv=await getInvoices(sw.id);
+      return [sw.id,inv.length];
+    })).then(pairs=>setInvoiceCounts(Object.fromEntries(pairs)));
+  },[softwares]);
 
   const openNew=()=>{ setEditSw(null); setShowForm(true); };
   const openEdit=(sw)=>{ setEditSw(sw); setShowForm(true); };
@@ -410,12 +509,13 @@ function SoftwareManager({ softwares, pcs, onSave, onDelete, isAdmin, C }) {
                       </button>
                     </div>
                   </div>
-                  {isAdmin && (
-                    <div style={{ display:"flex", gap:6 }}>
-                      <Btn onClick={()=>openEdit(sw)} variant="primary" style={{ padding:"5px 10px", fontSize:11 }}>✏️</Btn>
-                      <Btn onClick={()=>setConfirmDelete({id:sw.id,name:sw.softwareName,count:usingPCs.length})} variant="danger" style={{ padding:"5px 10px", fontSize:11 }}>🗑️</Btn>
+                  <div style={{ display:"flex", gap:6 }}>
+                      <Btn onClick={()=>setInvoiceView(sw)} variant="neutral" style={{ padding:"5px 10px", fontSize:11 }}>📄 {invoiceCounts[sw.id]>0?invoiceCounts[sw.id]:""}</Btn>
+                      {isAdmin && <>
+                        <Btn onClick={()=>openEdit(sw)} variant="primary" style={{ padding:"5px 10px", fontSize:11 }}>✏️</Btn>
+                        <Btn onClick={()=>setConfirmDelete({id:sw.id,name:sw.softwareName,count:usingPCs.length})} variant="danger" style={{ padding:"5px 10px", fontSize:11 }}>🗑️</Btn>
+                      </>}
                     </div>
-                  )}
                 </div>
                 {/* רשימת מחשבים שמשתמשים בתוכנה */}
                 {isExpanded && (
@@ -452,6 +552,12 @@ function SoftwareManager({ softwares, pcs, onSave, onDelete, isAdmin, C }) {
           onCancel={()=>setConfirmDelete(null)}
           C={C}
         />
+      )}
+      {/* Invoice Modal */}
+      {invoiceView && (
+        <Modal onClose={()=>{ setInvoiceView(null); getInvoices(invoiceView.id).then(inv=>setInvoiceCounts(c=>({...c,[invoiceView.id]:inv.length}))); }} C={C}>
+          <InvoiceManager softwareId={invoiceView.id} softwareName={`${invoiceView.companyName} — ${invoiceView.softwareName}`} onClose={()=>{ setInvoiceView(null); getInvoices(invoiceView.id).then(inv=>setInvoiceCounts(c=>({...c,[invoiceView.id]:inv.length}))); }} isAdmin={isAdmin} C={C}/>
+        </Modal>
       )}
     </div>
   );
@@ -513,8 +619,8 @@ function CostReport({ pcs, softwares, C }) {
           <option value="name">מיון: שם</option>
         </select>
       </div>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:"hidden" }}>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 110px 110px 110px", padding:"10px 16px", background:C.border+"44", color:C.muted, fontSize:11, textTransform:"uppercase" }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:"auto" }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 110px 110px 110px", padding:"10px 16px", background:C.border+"44", color:C.muted, fontSize:11, textTransform:"uppercase", minWidth:520 }}>
           <span>משתמש</span><span>תוכנות</span><span style={{textAlign:"left"}}>שנתי</span><span style={{textAlign:"left"}}>קבוע</span><span style={{textAlign:"left"}}>סה״כ</span>
         </div>
         {filtered.map(r=>(
@@ -774,56 +880,10 @@ function DeskForm({ desk, tableGroups, pcs, onSave, onCancel, onDelete, C }) {
   );
 }
 
-// ─── Compare ──────────────────────────────────────────────────────────────────
-function ComparePCs({ pcs, softwares, C }) {
-  const [selected,setSelected]=useState([]);
-  const toggle=id=>setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
-  const chosen=selected.map(id=>pcs[id]).filter(Boolean);
-  const swMap={}; softwares.forEach(s=>{swMap[s.id]=s;});
-  const CR=({label,fn,hi})=>{
-    const vals=chosen.map(pc=>fn(pc));const nums=vals.map(v=>parseFloat(v));const maxNum=Math.max(...nums.filter(n=>!isNaN(n)));
-    return(<tr><td style={{color:C.muted,fontSize:12,padding:"8px 14px",whiteSpace:"nowrap",borderBottom:`1px solid ${C.border}`,fontWeight:600}}>{label}</td>
-      {chosen.map((pc,i)=>{const isMax=hi&&!isNaN(nums[i])&&nums[i]===maxNum&&chosen.length>1;
-        return<td key={pc.pcId} style={{padding:"8px 14px",color:isMax?C.green:C.text,fontWeight:isMax?700:400,fontSize:12,background:isMax?C.green+"15":"transparent",borderBottom:`1px solid ${C.border}`}}>{vals[i]||"—"}</td>;})}
-    </tr>);
-  };
-  return (
-    <div>
-      <h3 style={{color:C.text,margin:"0 0 16px"}}>⚖️ השוואת מחשבים</h3>
-      <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:20}}>
-        {Object.values(pcs).map(pc=>(
-          <button key={pc.pcId} onClick={()=>toggle(pc.pcId)} style={{background:selected.includes(pc.pcId)?C.accent+"33":C.card,border:`1px solid ${selected.includes(pc.pcId)?C.accent:C.border}`,color:selected.includes(pc.pcId)?C.accent:C.muted,borderRadius:7,padding:"7px 14px",cursor:"pointer",fontSize:12,fontFamily:"inherit"}}>
-            {pc.userName||pc.pcId}
-          </button>
-        ))}
-      </div>
-      {chosen.length>=2?(
-        <div style={{overflowX:"auto"}}>
-          <table style={{width:"100%",borderCollapse:"collapse",background:C.card,borderRadius:10,overflow:"hidden"}}>
-            <thead><tr style={{background:C.border+"55"}}>
-              <th style={{color:C.muted,fontSize:11,padding:"10px 14px",textAlign:"right",textTransform:"uppercase"}}>מפרט</th>
-              {chosen.map(pc=><th key={pc.pcId} style={{color:C.accent,fontSize:13,padding:"10px 14px",textAlign:"right"}}>{pc.userName}<br/><span style={{color:C.muted,fontWeight:400,fontSize:10}}>{pc.pcId}</span></th>)}
-            </tr></thead>
-            <tbody>
-              <CR label="מ״ה" fn={p=>p.operatingSystem}/>
-              <CR label="CPU" fn={p=>p.cpuModel} hi/>
-              <CR label="GPU" fn={p=>p.gpuModel} hi/>
-              <CR label="RAM (GB)" fn={p=>p.ramGb} hi/>
-              <CR label="SSD (GB)" fn={p=>p.ssdGb} hi/>
-              <CR label="עלות שנתית" fn={p=>(p.softwareIds||[]).map(id=>swMap[id]).filter(Boolean).reduce((s,sw)=>s+calcAnnualCost(sw),0)}/>
-            </tbody>
-          </table>
-          <div style={{color:C.green,fontSize:11,marginTop:8}}>✦ ירוק = ערך גבוה יותר</div>
-        </div>
-      ):(
-        <div style={{color:C.muted,background:C.card,borderRadius:10,padding:32,textAlign:"center",border:`1px solid ${C.border}`}}>בחר לפחות 2 מחשבים</div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
+  const [isMobile,setIsMobile]=useState(()=>window.innerWidth<700);
+  useEffect(()=>{ const h=()=>setIsMobile(window.innerWidth<700); window.addEventListener("resize",h); return()=>window.removeEventListener("resize",h); },[]);
   const [session,setSession]=useState(null);
   const [themeKey,setThemeKey]=useState("dark");
   const C=THEMES[themeKey]; const isAdmin=session?.isAdmin;
@@ -868,10 +928,13 @@ export default function App() {
 
   const selectedPC=selectedDesk?.pcId?pcs[selectedDesk.pcId]:null;
   const TABS=[
-    {id:"map",label:"🗺️ מפה"},{id:"tables",label:"🗂️ שולחנות"},{id:"list",label:"📋 מחשבים"},
-    {id:"software",label:"💿 תוכנות"},{id:"report",label:"📊 דוח"},{id:"compare",label:"⚖️ השוואה"},
+    ...(!isMobile?[{id:"map",label:"🗺️ מפה"}]:[]),
+    {id:"tables",label:"🗂️ שולחנות"},{id:"list",label:"📋 מחשבים"},
+    {id:"software",label:"💿 תוכנות"},{id:"report",label:"📊 דוח"},
     ...(isAdmin?[{id:"admin",label:"👥 משתמשים"}]:[]),
   ];
+  // אם על נייד ונמצאים בטאב מפה — עבור לשולחנות
+  useEffect(()=>{ if(isMobile&&activeTab==="map") setActiveTab("tables"); },[isMobile]);
 
   if(!session) return <LoginScreen onLogin={handleLogin} C={C}/>;
 
@@ -903,15 +966,17 @@ export default function App() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{background:C.panel,borderBottom:`1px solid ${C.border}`,padding:"0 clamp(10px,1.5vw,24px)",display:"flex",gap:2,flexShrink:0,overflowX:"auto"}}>
-        {TABS.map(tab=>(
-          <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
-            style={{background:"none",border:"none",borderBottom:activeTab===tab.id?`2.5px solid ${C.accent}`:"2.5px solid transparent",color:activeTab===tab.id?C.accent:C.muted,padding:"clamp(7px,1.2vh,11px) clamp(10px,1.5vw,20px)",fontSize:"clamp(11px,1.2vw,13px)",fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",marginBottom:-1}}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* Tabs — desktop top bar, mobile bottom nav */}
+      {!isMobile && (
+        <div style={{background:C.panel,borderBottom:`1px solid ${C.border}`,padding:"0 clamp(10px,1.5vw,24px)",display:"flex",gap:2,flexShrink:0,overflowX:"auto"}}>
+          {TABS.map(tab=>(
+            <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
+              style={{background:"none",border:"none",borderBottom:activeTab===tab.id?`2.5px solid ${C.accent}`:"2.5px solid transparent",color:activeTab===tab.id?C.accent:C.muted,padding:"clamp(7px,1.2vh,11px) clamp(10px,1.5vw,20px)",fontSize:"clamp(11px,1.2vw,13px)",fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap",marginBottom:-1}}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Body */}
       <div style={{flex:1,overflow:"hidden",position:"relative"}}>
@@ -930,8 +995,8 @@ export default function App() {
           )}
           {activeTab==="tables"&&<div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}><TableGroupView desks={desks} pcs={pcs} tableGroups={tableGroups} onSelectDesk={d=>{setSelectedDesk(d);setActiveTab("map");}} onGroupsChange={handleGroupsChange} onAskConfirm={askConfirm} isAdmin={isAdmin} C={C}/></div>}
           {activeTab==="list"&&(
-            <div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>
+            <div style={{flex:1,overflowY:"auto",padding:`clamp(14px,2vh,22px) clamp(14px,2vw,28px) ${isMobile?"80px":"22px"}`}}>
+              <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(280px,1fr))",gap:isMobile?10:14}}>
                 {Object.values(pcs).map(pc=>(
                   <div key={pc.pcId} onClick={()=>setSelectedDesk({pcId:pc.pcId,label:"—",tableGroup:"—"})}
                     style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"clamp(12px,1.5vw,18px)",cursor:"pointer",transition:"all .15s"}}
@@ -953,14 +1018,19 @@ export default function App() {
           )}
           {activeTab==="software"&&<div style={{flex:1,overflowY:"auto"}}><SoftwareManager softwares={softwares} pcs={pcs} onSave={handleSaveSoftware} onDelete={handleDeleteSoftware} isAdmin={isAdmin} C={C}/></div>}
           {activeTab==="report"&&<div style={{flex:1,overflowY:"auto"}}><CostReport pcs={pcs} softwares={softwares} C={C}/></div>}
-          {activeTab==="compare"&&<div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}><ComparePCs pcs={pcs} softwares={softwares} C={C}/></div>}
           {activeTab==="admin"&&isAdmin&&<div style={{flex:1,overflowY:"auto"}}><AdminPanel session={session} onLogout={handleLogout} C={C}/></div>}
         </div>
 
-        {/* Sidebar */}
-        <div style={{position:"absolute",top:0,left:0,bottom:0,width:selectedDesk?"clamp(300px,28vw,420px)":0,borderLeft:"none",borderRight:selectedDesk?`1px solid ${C.border}`:"none",background:C.panel,overflowY:"auto",overflowX:"hidden",transition:"width .22s cubic-bezier(.4,0,.2,1)",zIndex:20,boxShadow:selectedDesk?"4px 0 20px #0004":"none"}}>
+        {/* Sidebar — desktop: panel lateral, mobile: full overlay */}
+        <div style={{
+          position:"absolute", top:0, left:0, bottom:0, zIndex:20,
+          ...(isMobile
+            ? { right:0, width:selectedDesk?"100%":"0%", background:C.panel, overflowY:"auto", overflowX:"hidden", transition:"width .22s ease" }
+            : { width:selectedDesk?"clamp(300px,28vw,420px)":0, borderRight:selectedDesk?`1px solid ${C.border}`:"none", background:C.panel, overflowY:"auto", overflowX:"hidden", transition:"width .22s cubic-bezier(.4,0,.2,1)", boxShadow:selectedDesk?"4px 0 20px #0004":"none" }
+          )
+        }}>
           {selectedDesk&&(
-            <div style={{width:"clamp(300px,28vw,420px)",padding:"clamp(12px,1.5vw,20px)"}}>
+            <div style={{width:isMobile?"100%":"clamp(300px,28vw,420px)",padding:"clamp(12px,1.5vw,20px)"}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
                 <div><div style={{color:C.muted,fontSize:10,textTransform:"uppercase",letterSpacing:1}}>שולחן {selectedDesk.label}</div><div style={{color:C.dim,fontSize:11}}>{selectedDesk.tableGroup}</div></div>
                 <button onClick={()=>setSelectedDesk(null)} style={{background:C.dim+"33",border:"none",color:C.muted,cursor:"pointer",fontSize:18,width:30,height:30,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
@@ -982,6 +1052,18 @@ export default function App() {
         </div>
       </div>
 
+      {/* Mobile bottom nav */}
+      {isMobile && !selectedDesk && (
+        <div style={{position:"fixed",bottom:0,left:0,right:0,background:C.panel,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:50,boxShadow:"0 -2px 12px #0005"}}>
+          {TABS.map(tab=>(
+            <button key={tab.id} onClick={()=>setActiveTab(tab.id)}
+              style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"10px 4px 8px",background:"none",border:"none",color:activeTab===tab.id?C.accent:C.muted,cursor:"pointer",fontFamily:"inherit",fontSize:9,fontWeight:700,borderTop:activeTab===tab.id?`2px solid ${C.accent}`:"2px solid transparent"}}>
+              <span style={{fontSize:18}}>{tab.label.split(" ")[0]}</span>
+              <span style={{whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",maxWidth:60}}>{tab.label.split(" ").slice(1).join(" ")}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {/* Modals */}
       {modal&&(
         <Modal onClose={()=>setModal(null)} C={C}>

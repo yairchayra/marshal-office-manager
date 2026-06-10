@@ -15,7 +15,10 @@ import {
   getStorage,
   ref,
   uploadString,
+  uploadBytes,
   getDownloadURL,
+  listAll,
+  deleteObject,
 } from "firebase/storage";
 import {
   getAuth,
@@ -54,7 +57,7 @@ export {
   writeBatch,
   orderBy, query, where,
   serverTimestamp,
-  ref, uploadString, getDownloadURL,
+  ref, uploadString, uploadBytes, getDownloadURL, listAll, deleteObject,
   signInWithEmailAndPassword,
   signOut,
   createUserWithEmailAndPassword,

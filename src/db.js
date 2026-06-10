@@ -7,7 +7,7 @@ import {
   writeBatch,
   orderBy, query, where,
   serverTimestamp,
-  ref, uploadString, getDownloadURL,
+  ref, uploadString, uploadBytes, getDownloadURL, listAll, deleteObject,
   signInWithEmailAndPassword,
   signOut,
   createUserWithEmailAndPassword,
@@ -99,7 +99,6 @@ export function softwareToDoc(sw) {
     expiryDate:   type !== "permanent" ? (clean(sw.expiryDate) || null) : null,
     months:       type === "monthly" ? (parseInt(sw.months) || 12) : null,
     price:        toNum(sw.price) || 0,
-    invoice:      clean(sw.invoice)    || null,
     productKey:   clean(sw.productKey) || null,
     updatedAt:    serverTimestamp(),
   };
@@ -114,9 +113,36 @@ export function docToSoftware(id, data) {
     expiryDate:   data.expiryDate   || null,
     months:       data.months       || 12,
     price:        data.price        || 0,
-    invoice:      data.invoice      || null,
     productKey:   data.productKey   || null,
   };
+}
+
+// ─── Invoice files (Firebase Storage) ────────────────────────────────────────
+// Path: invoices/{softwareId}/{filename}
+
+export async function getInvoices(softwareId) {
+  try {
+    const folderRef = ref(storage, `invoices/${softwareId}`);
+    const result = await listAll(folderRef);
+    const files = await Promise.all(result.items.map(async item => ({
+      name: item.name,
+      path: item.fullPath,
+      url:  await getDownloadURL(item),
+    })));
+    return files;
+  } catch { return []; }
+}
+
+export async function uploadInvoice(softwareId, file) {
+  const safeFilename = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, "_")}`;
+  const fileRef = ref(storage, `invoices/${softwareId}/${safeFilename}`);
+  await uploadBytes(fileRef, file);
+  const url = await getDownloadURL(fileRef);
+  return { name: file.name, path: fileRef.fullPath, url };
+}
+
+export async function deleteInvoice(filePath) {
+  await deleteObject(ref(storage, filePath));
 }
 
 export async function getSoftwares() {
