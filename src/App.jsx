@@ -461,6 +461,17 @@ function SoftwareManager({ softwares, pcs, onSave, onDelete, isAdmin, C }) {
   const getPCsUsing=(swId)=>Object.values(pcs).filter(pc=>(pc.softwareIds||[]).includes(swId));
 
   const byCompany = softwares.reduce((acc,s)=>{ (acc[s.companyName]=acc[s.companyName]||[]).push(s); return acc; },{});
+  const [collapsedCompanies,setCollapsedCompanies]=useState({});
+  // collapse all companies by default when softwares load
+  useEffect(()=>{
+    if(!softwares.length)return;
+    setCollapsedCompanies(prev=>{
+      const next={...prev};
+      Object.keys(byCompany).forEach(c=>{ if(!(c in next)) next[c]=true; });
+      return next;
+    });
+  },[softwares.length]);
+  const toggleCompany=(name)=>setCollapsedCompanies(c=>({...c,[name]:!c[name]}));
 
   return (
     <div style={{ padding:"clamp(14px,2vw,28px)" }}>
@@ -484,8 +495,11 @@ function SoftwareManager({ softwares, pcs, onSave, onDelete, isAdmin, C }) {
 
       {Object.entries(byCompany).map(([company,sws])=>(
         <div key={company} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, marginBottom:14, overflow:"hidden" }}>
-          <div style={{ padding:"12px 18px", background:C.border+"33", color:C.accent, fontWeight:700, fontSize:14 }}>🏢 {company}</div>
-          {sws.map(sw=>{
+          <div onClick={()=>toggleCompany(company)} style={{ padding:"12px 18px", background:C.border+"33", display:"flex", justifyContent:"space-between", alignItems:"center", cursor:"pointer" }}>
+            <span style={{color:C.accent,fontWeight:700,fontSize:14}}>🏢 {company}</span>
+            <span style={{color:C.muted,fontSize:13}}>{collapsedCompanies[company]?`${sws.length} תוכנות ▼`:"▲"}</span>
+          </div>
+          {!collapsedCompanies[company]&&sws.map(sw=>{
             const usingPCs = getPCsUsing(sw.id);
             const isExpanded = expandedSw === sw.id;
             return (
@@ -564,10 +578,11 @@ function SoftwareManager({ softwares, pcs, onSave, onDelete, isAdmin, C }) {
 }
 
 // ─── Cost Report ──────────────────────────────────────────────────────────────
-function CostReport({ pcs, softwares, C }) {
+function CostReport({ pcs, softwares, isMobile, C }) {
   const [report,setReport]=useState([]);
   const [filter,setFilter]=useState("");
   const [sortBy,setSortBy]=useState("totalCost");
+  const [expandedRow,setExpandedRow]=useState(null);
 
   useEffect(()=>{ getCostReport(pcs,softwares).then(setReport); },[pcs,softwares]);
 
@@ -589,62 +604,126 @@ function CostReport({ pcs, softwares, C }) {
     XLSX.writeFile(wb,`cost-report-${new Date().toISOString().slice(0,10)}.xlsx`);
   };
 
+  const swColor=(s)=>s.licenseType==="permanent"?C.green:s.licenseType==="annual"?C.accent2:C.yellow;
+
   return (
-    <div style={{ padding:"clamp(14px,2vw,28px)" }}>
+    <div style={{ padding:`clamp(14px,2vw,28px) clamp(14px,2vw,28px) ${isMobile?"80px":"28px"}` }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:10 }}>
-        <h3 style={{ color:C.text, margin:0, fontSize:"clamp(14px,1.8vw,18px)" }}>📊 דוח עלויות רישיונות</h3>
-        <Btn onClick={exportReport} variant="warning" style={{ fontSize:12 }}>📤 ייצא Excel</Btn>
+        <h3 style={{ color:C.text, margin:0, fontSize:"clamp(14px,1.8vw,18px)" }}>📊 דוח עלויות</h3>
+        <Btn onClick={exportReport} variant="warning" style={{ fontSize:12 }}>📤 Excel</Btn>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(180px,1fr))", gap:12, marginBottom:24 }}>
+
+      {/* סיכום */}
+      <div style={{ display:"grid", gridTemplateColumns:isMobile?"1fr 1fr":"repeat(auto-fill,minmax(180px,1fr))", gap:10, marginBottom:20 }}>
         {[
-          {label:"עלות שנתית כוללת",value:`₪${totalAnnual.toLocaleString()}`,color:C.accent2},
-          {label:"עלות קבועה כוללת",value:`₪${totalPermanent.toLocaleString()}`,color:C.green},
-          {label:"סה״כ כולל",value:`₪${(totalAnnual+totalPermanent).toLocaleString()}`,color:C.accent},
-          {label:"משתמשים עם תוכנות",value:report.filter(r=>r.totalCost>0).length,color:C.muted},
+          {label:"שנתי",value:`₪${totalAnnual.toLocaleString()}`,color:C.accent2},
+          {label:"קבוע",value:`₪${totalPermanent.toLocaleString()}`,color:C.green},
+          {label:"סה״כ",value:`₪${(totalAnnual+totalPermanent).toLocaleString()}`,color:C.accent},
+          {label:"עובדים",value:report.filter(r=>r.totalCost>0).length,color:C.muted},
         ].map(card=>(
-          <div key={card.label} style={{ background:C.card, border:`1px solid ${card.color}44`, borderRadius:10, padding:"14px 18px" }}>
-            <div style={{ color:C.muted, fontSize:10, textTransform:"uppercase", marginBottom:6 }}>{card.label}</div>
-            <div style={{ color:card.color, fontSize:22, fontWeight:800 }}>{card.value}</div>
+          <div key={card.label} style={{ background:C.card, border:`1px solid ${card.color}44`, borderRadius:10, padding:"12px 14px" }}>
+            <div style={{ color:C.muted, fontSize:10, textTransform:"uppercase", marginBottom:4 }}>{card.label}</div>
+            <div style={{ color:card.color, fontSize:isMobile?18:22, fontWeight:800 }}>{card.value}</div>
           </div>
         ))}
       </div>
-      <div style={{ display:"flex", gap:10, marginBottom:16, flexWrap:"wrap" }}>
-        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 חיפוש לפי שם / מייל..."
-          style={{ flex:1, minWidth:180, background:C.inputBg, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 14px", color:C.text, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
-        <select value={sortBy} onChange={e=>setSortBy(e.target.value)}
+
+      {/* פילטר */}
+      <div style={{ display:"flex", gap:8, marginBottom:14, flexWrap:"wrap" }}>
+        <input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="🔍 חיפוש.."
+          style={{ flex:1, minWidth:140, background:C.inputBg, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 12px", color:C.text, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
+        {!isMobile&&<select value={sortBy} onChange={e=>setSortBy(e.target.value)}
           style={{ background:C.inputBg, border:`1px solid ${C.border}`, borderRadius:8, padding:"8px 12px", color:C.text, fontSize:13, fontFamily:"inherit", outline:"none" }}>
           <option value="totalCost">מיון: סה״כ</option>
           <option value="annualCost">מיון: שנתי</option>
           <option value="permanentCost">מיון: קבוע</option>
           <option value="name">מיון: שם</option>
-        </select>
+        </select>}
       </div>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:"auto" }}>
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 110px 110px 110px", padding:"10px 16px", background:C.border+"44", color:C.muted, fontSize:11, textTransform:"uppercase", minWidth:520 }}>
-          <span>משתמש</span><span>תוכנות</span><span style={{textAlign:"left"}}>שנתי</span><span style={{textAlign:"left"}}>קבוע</span><span style={{textAlign:"left"}}>סה״כ</span>
+
+      {/* נייד: כרטיסים מתקפלים */}
+      {isMobile ? (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {filtered.map(r=>{
+            const open=expandedRow===r.pcId;
+            return (
+              <div key={r.pcId} style={{ background:C.card, border:`1px solid ${open?C.accent:C.border}`, borderRadius:10, overflow:"hidden" }}>
+                <div onClick={()=>setExpandedRow(open?null:r.pcId)}
+                  style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 14px", cursor:"pointer" }}>
+                  <div>
+                    <div style={{ color:C.text, fontWeight:800, fontSize:14 }}>{r.userName||"—"}</div>
+                    <div style={{ color:C.dim, fontSize:11 }}>{r.pcId}</div>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <div style={{ textAlign:"left" }}>
+                      <div style={{ color:r.totalCost>0?C.accent:C.dim, fontWeight:800, fontSize:15 }}>{r.totalCost>0?`₪${r.totalCost.toLocaleString()}`:"—"}</div>
+                      <div style={{ color:C.muted, fontSize:10 }}>לשנה</div>
+                    </div>
+                    <span style={{ color:C.muted, fontSize:14 }}>{open?"▲":"▼"}</span>
+                  </div>
+                </div>
+                {open && (
+                  <div style={{ padding:"0 14px 14px", borderTop:`1px solid ${C.border}` }}>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, margin:"12px 0" }}>
+                      <div style={{ background:C.bg, borderRadius:8, padding:"8px 10px", border:`1px solid ${C.accent2}44` }}>
+                        <div style={{ color:C.muted, fontSize:10, marginBottom:2 }}>שנתי</div>
+                        <div style={{ color:C.accent2, fontWeight:700 }}>{r.annualCost>0?`₪${r.annualCost.toLocaleString()}`:"—"}</div>
+                      </div>
+                      <div style={{ background:C.bg, borderRadius:8, padding:"8px 10px", border:`1px solid ${C.green}44` }}>
+                        <div style={{ color:C.muted, fontSize:10, marginBottom:2 }}>קבוע</div>
+                        <div style={{ color:C.green, fontWeight:700 }}>{r.permanentCost>0?`₪${r.permanentCost.toLocaleString()}`:"—"}</div>
+                      </div>
+                      <div style={{ background:C.bg, borderRadius:8, padding:"8px 10px", border:`1px solid ${C.accent}44` }}>
+                        <div style={{ color:C.muted, fontSize:10, marginBottom:2 }}>כולל</div>
+                        <div style={{ color:C.accent, fontWeight:800 }}>{r.totalCost>0?`₪${r.totalCost.toLocaleString()}`:"—"}</div>
+                      </div>
+                    </div>
+                    {r.softwares.length>0 && (
+                      <div>
+                        <div style={{ color:C.muted, fontSize:10, textTransform:"uppercase", marginBottom:6 }}>תוכנות</div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                          {r.softwares.map(s=>(
+                            <span key={s.id} style={{ background:swColor(s)+"22", color:swColor(s), borderRadius:4, padding:"3px 8px", fontSize:11, fontWeight:700 }}>
+                              {s.softwareName} · ₪{s.price}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {filtered.length===0&&<div style={{padding:40,textAlign:"center",color:C.muted}}>אין נתונים</div>}
         </div>
-        {filtered.map(r=>(
-          <div key={r.pcId} style={{ borderTop:`1px solid ${C.border}`, padding:"12px 16px", display:"grid", gridTemplateColumns:"1fr 1fr 110px 110px 110px", alignItems:"start", gap:0 }}>
-            <div>
-              <div style={{ color:C.text, fontWeight:700, fontSize:13 }}>{r.userName||"—"}</div>
-              <div style={{ color:C.dim, fontSize:11 }}>{r.pcId}</div>
-              {r.userMail&&<div style={{ color:C.dim, fontSize:11 }}>✉ {r.userMail}</div>}
-            </div>
-            <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
-              {r.softwares.map(s=>(
-                <span key={s.id} style={{ background:(s.licenseType==="permanent"?C.green:s.licenseType==="annual"?C.accent2:C.yellow)+"22", color:s.licenseType==="permanent"?C.green:s.licenseType==="annual"?C.accent2:C.yellow, borderRadius:4, padding:"2px 6px", fontSize:10, fontWeight:700 }}>
-                  {s.softwareName}
-                </span>
-              ))}
-              {r.softwares.length===0&&<span style={{color:C.dim,fontSize:11}}>אין תוכנות</span>}
-            </div>
-            <div style={{ color:r.annualCost>0?C.accent2:C.dim, fontWeight:700, fontSize:13 }}>{r.annualCost>0?`₪${r.annualCost.toLocaleString()}`:"—"}</div>
-            <div style={{ color:r.permanentCost>0?C.green:C.dim, fontWeight:700, fontSize:13 }}>{r.permanentCost>0?`₪${r.permanentCost.toLocaleString()}`:"—"}</div>
-            <div style={{ color:r.totalCost>0?C.accent:C.dim, fontWeight:800, fontSize:14 }}>{r.totalCost>0?`₪${r.totalCost.toLocaleString()}`:"—"}</div>
+      ) : (
+        /* דסקטופ: טבלה */
+        <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, overflow:"auto" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 110px 110px 110px", padding:"10px 16px", background:C.border+"44", color:C.muted, fontSize:11, textTransform:"uppercase", minWidth:520 }}>
+            <span>משתמש</span><span>תוכנות</span><span>שנתי</span><span>קבוע</span><span>סה״כ</span>
           </div>
-        ))}
-        {filtered.length===0&&<div style={{padding:40,textAlign:"center",color:C.muted}}>אין נתונים</div>}
-      </div>
+          {filtered.map(r=>(
+            <div key={r.pcId} style={{ borderTop:`1px solid ${C.border}`, padding:"12px 16px", display:"grid", gridTemplateColumns:"1fr 1fr 110px 110px 110px", alignItems:"start" }}>
+              <div>
+                <div style={{ color:C.text, fontWeight:700, fontSize:13 }}>{r.userName||"—"}</div>
+                <div style={{ color:C.dim, fontSize:11 }}>{r.pcId}</div>
+                {r.userMail&&<div style={{ color:C.dim, fontSize:11 }}>✉ {r.userMail}</div>}
+              </div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:4 }}>
+                {r.softwares.map(s=>(
+                  <span key={s.id} style={{ background:swColor(s)+"22", color:swColor(s), borderRadius:4, padding:"2px 6px", fontSize:10, fontWeight:700 }}>{s.softwareName}</span>
+                ))}
+                {r.softwares.length===0&&<span style={{color:C.dim,fontSize:11}}>אין</span>}
+              </div>
+              <div style={{ color:r.annualCost>0?C.accent2:C.dim, fontWeight:700, fontSize:13 }}>{r.annualCost>0?`₪${r.annualCost.toLocaleString()}`:"—"}</div>
+              <div style={{ color:r.permanentCost>0?C.green:C.dim, fontWeight:700, fontSize:13 }}>{r.permanentCost>0?`₪${r.permanentCost.toLocaleString()}`:"—"}</div>
+              <div style={{ color:r.totalCost>0?C.accent:C.dim, fontWeight:800, fontSize:14 }}>{r.totalCost>0?`₪${r.totalCost.toLocaleString()}`:"—"}</div>
+            </div>
+          ))}
+          {filtered.length===0&&<div style={{padding:40,textAlign:"center",color:C.muted}}>אין נתונים</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -764,6 +843,18 @@ const TABLE_COLORS=["#6aa3fc","#5de89a","#fc6b6b","#fde96a","#fbb360","#c084fc",
 function TableGroupView({ desks, pcs, tableGroups, onSelectDesk, onGroupsChange, onAskConfirm, isAdmin, C }) {
   const [editingGroup,setEditingGroup]=useState(null);const [showAdd,setShowAdd]=useState(false);
   const [newName,setNewName]=useState("");const [newColor,setNewColor]=useState(TABLE_COLORS[0]);
+  const [collapsed,setCollapsed]=useState(()=>Object.fromEntries((tableGroups||[]).map(g=>[g.name,true])));
+
+  // sync collapsed state when tableGroups change (new groups start collapsed)
+  useEffect(()=>{
+    setCollapsed(prev=>{
+      const next={...prev};
+      tableGroups.forEach(g=>{ if(!(g.name in next)) next[g.name]=true; });
+      return next;
+    });
+  },[tableGroups]);
+
+  const toggleCollapse=(name)=>setCollapsed(c=>({...c,[name]:!c[name]}));
   const saveNew=async()=>{ if(!newName.trim())return; await onGroupsChange([...tableGroups,{name:newName.trim(),color:newColor}]); setNewName("");setNewColor(TABLE_COLORS[0]);setShowAdd(false); };
   const saveEdit=async()=>{ await onGroupsChange(tableGroups.map(g=>g.name===editingGroup.original?{name:editingGroup.name,color:editingGroup.color}:g)); setEditingGroup(null); };
   const delGroup=(name)=>{ onAskConfirm(`למחוק קבוצה "${name}"?`,`השולחנות בקבוצה יאבדו את הצבע.`,async()=>{ await onGroupsChange(tableGroups.filter(g=>g.name!==name)); }); };
@@ -801,14 +892,15 @@ function TableGroupView({ desks, pcs, tableGroups, onSelectDesk, onGroupsChange,
                 </div>
               </div>
             ):(
-              <div style={{padding:"14px 18px",display:"flex",alignItems:"center",gap:10}}>
+              <div onClick={()=>toggleCollapse(group.name)} style={{padding:"14px 18px",display:"flex",alignItems:"center",gap:10,cursor:"pointer"}}>
                 <div style={{width:14,height:14,borderRadius:"50%",background:group.color,flexShrink:0}}/>
                 <span style={{color:C.text,fontWeight:700,fontSize:15,flex:1}}>{group.name}</span>
-                <span style={{color:C.muted,fontSize:12}}>{gd.length} מקומות</span>
-                {isAdmin&&<Btn onClick={()=>setEditingGroup({original:group.name,name:group.name,color:group.color})} variant="primary" style={{padding:"4px 10px",fontSize:11}}>✏️</Btn>}
+                <span style={{color:C.muted,fontSize:12,marginLeft:4}}>{gd.length} מקומות</span>
+                <span style={{color:C.muted,fontSize:13,marginLeft:4}}>{collapsed[group.name]?"▼":"▲"}</span>
+                {isAdmin&&<Btn onClick={e=>{e.stopPropagation();setEditingGroup({original:group.name,name:group.name,color:group.color});}} variant="primary" style={{padding:"4px 10px",fontSize:11}}>✏️</Btn>}
               </div>
             )}
-            {gd.length>0&&(
+            {!collapsed[group.name]&&gd.length>0&&(
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:8,padding:"0 16px 16px"}}>
                 {gd.map(desk=>{const pc=desk.pcId?pcs[desk.pcId]:null;return(
                   <div key={desk.id} onClick={()=>onSelectDesk(desk)} style={{background:C.bg,border:`1.5px solid ${pc?group.color+"88":C.border}`,borderRadius:8,padding:"10px 12px",cursor:"pointer"}}>
@@ -817,6 +909,9 @@ function TableGroupView({ desks, pcs, tableGroups, onSelectDesk, onGroupsChange,
                   </div>
                 );})}
               </div>
+            )}
+            {!collapsed[group.name]&&gd.length===0&&(
+              <div style={{padding:"10px 18px 14px",color:C.dim,fontSize:12}}>אין שולחנות בקבוצה זו</div>
             )}
           </div>
         );
@@ -893,6 +988,7 @@ export default function App() {
   const [floorImage,setFloorImage]=useState(null); const [selectedDesk,setSelectedDesk]=useState(null);
   const [editMode,setEditMode]=useState(false); const [activeTab,setActiveTab]=useState("map");
   const [modal,setModal]=useState(null); const [toast,setToast]=useState(null); const [loading,setLoading]=useState(false); const [confirmDlg,setConfirmDlg]=useState(null);
+  const [pcSearch,setPcSearch]=useState(""); const [pcSort,setPcSort]=useState("az");
   const askConfirm=(title,message,onConfirm)=>setConfirmDlg({title,message,onConfirm});
 
   const showToast=(msg,type="success")=>{ setToast({msg,type}); setTimeout(()=>setToast(null),4000); };
@@ -943,25 +1039,25 @@ export default function App() {
       {toast&&<div style={{position:"fixed",top:16,left:16,zIndex:999,background:toast.type==="error"?C.red+"22":C.green+"22",border:`1px solid ${toast.type==="error"?C.red:C.green}88`,borderRadius:10,padding:"12px 20px",color:toast.type==="error"?C.red:C.green,fontSize:13,fontWeight:700,boxShadow:C.shadow,maxWidth:360}}>{toast.msg}</div>}
 
       {/* Header */}
-      <div style={{background:C.panel,borderBottom:`1px solid ${C.border}`,padding:"0 clamp(12px,2vw,24px)",display:"flex",alignItems:"center",justifyContent:"space-between",height:"clamp(48px,6vh,60px)",flexShrink:0,boxShadow:C.shadow,gap:8}}>
-        <div style={{display:"flex",alignItems:"center",gap:"clamp(8px,1.5vw,18px)"}}>
-          <div style={{background:C.accent+"22",border:`1px solid ${C.accent}55`,borderRadius:8,padding:"5px clamp(8px,1.5vw,14px)",color:C.accent,fontWeight:800,fontSize:"clamp(11px,1.4vw,14px)",letterSpacing:1,whiteSpace:"nowrap"}}>⚙ OFFICE MGR</div>
-          <span style={{color:C.text,fontSize:"clamp(11px,1.2vw,13px)"}}><b style={{color:C.accent}}>{Object.keys(pcs).length}</b> מחשבים</span>
-          <span style={{color:C.dim}}>·</span>
-          <span style={{color:C.text,fontSize:"clamp(11px,1.2vw,13px)"}}><b style={{color:C.green}}>{softwares.length}</b> תוכנות</span>
+      <div style={{background:C.panel,borderBottom:`1px solid ${C.border}`,padding:isMobile?"0 10px":"0 clamp(12px,2vw,24px)",display:"flex",alignItems:"center",justifyContent:"space-between",height:isMobile?"52px":"clamp(48px,6vh,60px)",flexShrink:0,boxShadow:C.shadow,gap:6}}>
+        {/* Logo + stats */}
+        <div style={{display:"flex",alignItems:"center",gap:isMobile?6:"clamp(8px,1.5vw,18px)",minWidth:0,overflow:"hidden"}}>
+          <div style={{background:C.accent+"22",border:`1px solid ${C.accent}55`,borderRadius:7,padding:isMobile?"4px 8px":"5px clamp(8px,1.5vw,14px)",color:C.accent,fontWeight:800,fontSize:isMobile?12:"clamp(11px,1.4vw,14px)",letterSpacing:1,whiteSpace:"nowrap",flexShrink:0}}>⚙{!isMobile&&" OFFICE MGR"}</div>
+          {!isMobile&&<><span style={{color:C.text,fontSize:"clamp(11px,1.2vw,13px)"}}><b style={{color:C.accent}}>{Object.keys(pcs).length}</b> מחשבים</span><span style={{color:C.dim}}>·</span><span style={{color:C.text,fontSize:"clamp(11px,1.2vw,13px)"}}><b style={{color:C.green}}>{softwares.length}</b> תוכנות</span></>}
           {loading&&<span style={{color:C.muted,fontSize:12}}>⏳</span>}
         </div>
-        <div style={{display:"flex",gap:"clamp(4px,.8vw,10px)",alignItems:"center"}}>
-          <button onClick={()=>setThemeKey(k=>k==="dark"?"light":"dark")} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:"6px 10px",color:C.muted,fontSize:15,cursor:"pointer"}}>{themeKey==="dark"?"☀️":"🌙"}</button>
+        {/* Actions */}
+        <div style={{display:"flex",gap:isMobile?4:"clamp(4px,.8vw,10px)",alignItems:"center",flexShrink:0}}>
+          <button onClick={()=>setThemeKey(k=>k==="dark"?"light":"dark")} style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:7,padding:isMobile?"6px 8px":"6px 10px",color:C.muted,fontSize:isMobile?14:15,cursor:"pointer",flexShrink:0}}>{themeKey==="dark"?"☀️":"🌙"}</button>
           {isAdmin&&<>
-            <label style={{background:C.dim+"22",border:`1px solid ${C.border}`,borderRadius:7,padding:"6px clamp(8px,1vw,14px)",color:C.muted,fontSize:"clamp(11px,1.1vw,13px)",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+            {!isMobile&&<label style={{background:C.dim+"22",border:`1px solid ${C.border}`,borderRadius:7,padding:"6px clamp(8px,1vw,14px)",color:C.muted,fontSize:"clamp(11px,1.1vw,13px)",cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
               🖼️ מפה<input type="file" accept="image/*" onChange={handleFloorUpload} style={{display:"none"}}/>
-            </label>
-            <button onClick={()=>setModal({type:"addPC"})} style={{background:C.green+"22",border:`1px solid ${C.green}55`,borderRadius:7,padding:"6px clamp(8px,1vw,14px)",color:C.green,fontSize:"clamp(11px,1.1vw,13px)",cursor:"pointer",fontFamily:"inherit",fontWeight:800,whiteSpace:"nowrap"}}>+ מחשב</button>
+            </label>}
+            <button onClick={()=>setModal({type:"addPC"})} style={{background:C.green+"22",border:`1px solid ${C.green}55`,borderRadius:7,padding:isMobile?"6px 10px":"6px clamp(8px,1vw,14px)",color:C.green,fontSize:isMobile?12:"clamp(11px,1.1vw,13px)",cursor:"pointer",fontFamily:"inherit",fontWeight:800,whiteSpace:"nowrap"}}>+ {!isMobile&&"מחשב"}{isMobile&&"💻"}</button>
           </>}
-          <div style={{display:"flex",alignItems:"center",gap:8,borderRight:`1px solid ${C.border}`,paddingRight:"clamp(6px,1vw,12px)"}}>
-            <div><div style={{color:C.text,fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>{session.displayName||session.email}</div><div style={{color:isAdmin?C.accent:C.muted,fontSize:10}}>{isAdmin?"Admin":"Viewer"}</div></div>
-            <button onClick={handleLogout} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:6,padding:"5px 10px",color:C.red,fontSize:"clamp(10px,1vw,12px)",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>יציאה</button>
+          <div style={{display:"flex",alignItems:"center",gap:isMobile?4:8,borderRight:`1px solid ${C.border}`,paddingRight:isMobile?6:"clamp(6px,1vw,12px)"}}>
+            {!isMobile&&<div><div style={{color:C.text,fontSize:12,fontWeight:700,whiteSpace:"nowrap"}}>{session.displayName||session.email}</div><div style={{color:isAdmin?C.accent:C.muted,fontSize:10}}>{isAdmin?"Admin":"Viewer"}</div></div>}
+            <button onClick={handleLogout} style={{background:C.red+"18",border:`1px solid ${C.red}44`,borderRadius:6,padding:isMobile?"6px 8px":"5px 10px",color:C.red,fontSize:isMobile?12:"clamp(10px,1vw,12px)",cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>{isMobile?"🚪":"יציאה"}</button>
           </div>
         </div>
       </div>
@@ -996,8 +1092,20 @@ export default function App() {
           {activeTab==="tables"&&<div style={{flex:1,overflowY:"auto",padding:"clamp(14px,2vh,22px) clamp(14px,2vw,28px)"}}><TableGroupView desks={desks} pcs={pcs} tableGroups={tableGroups} onSelectDesk={d=>{setSelectedDesk(d);setActiveTab("map");}} onGroupsChange={handleGroupsChange} onAskConfirm={askConfirm} isAdmin={isAdmin} C={C}/></div>}
           {activeTab==="list"&&(
             <div style={{flex:1,overflowY:"auto",padding:`clamp(14px,2vh,22px) clamp(14px,2vw,28px) ${isMobile?"80px":"22px"}`}}>
+              {/* Search + Sort */}
+              <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
+                <input value={pcSearch} onChange={e=>setPcSearch(e.target.value)} placeholder="🔍 חיפוש לפי שם או מספר מחשב..."
+                  style={{flex:1,minWidth:160,background:C.inputBg,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 14px",color:C.text,fontSize:13,fontFamily:"inherit",outline:"none"}}/>
+                <button onClick={()=>setPcSort(s=>s==="az"?"za":"az")}
+                  style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:8,padding:"9px 14px",color:C.muted,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",whiteSpace:"nowrap"}}>
+                  {pcSort==="az"?"א→ת ↑":"ת→א ↓"}
+                </button>
+              </div>
               <div style={{display:"grid",gridTemplateColumns:isMobile?"1fr":"repeat(auto-fill,minmax(280px,1fr))",gap:isMobile?10:14}}>
-                {Object.values(pcs).map(pc=>(
+                {Object.values(pcs)
+                  .filter(pc=>!pcSearch||pc.userName?.toLowerCase().includes(pcSearch.toLowerCase())||pc.pcId?.toLowerCase().includes(pcSearch.toLowerCase()))
+                  .sort((a,b)=>{ const na=a.userName||a.pcId||""; const nb=b.userName||b.pcId||""; return pcSort==="az"?na.localeCompare(nb,"he"):nb.localeCompare(na,"he"); })
+                  .map(pc=>(
                   <div key={pc.pcId} onClick={()=>setSelectedDesk({pcId:pc.pcId,label:"—",tableGroup:"—"})}
                     style={{background:C.card,border:`1px solid ${C.border}`,borderRadius:10,padding:"clamp(12px,1.5vw,18px)",cursor:"pointer",transition:"all .15s"}}
                     onMouseEnter={e=>e.currentTarget.style.borderColor=C.accent+"88"} onMouseLeave={e=>e.currentTarget.style.borderColor=C.border}>
@@ -1017,7 +1125,7 @@ export default function App() {
             </div>
           )}
           {activeTab==="software"&&<div style={{flex:1,overflowY:"auto"}}><SoftwareManager softwares={softwares} pcs={pcs} onSave={handleSaveSoftware} onDelete={handleDeleteSoftware} isAdmin={isAdmin} C={C}/></div>}
-          {activeTab==="report"&&<div style={{flex:1,overflowY:"auto"}}><CostReport pcs={pcs} softwares={softwares} C={C}/></div>}
+          {activeTab==="report"&&<div style={{flex:1,overflowY:"auto"}}><CostReport pcs={pcs} softwares={softwares} isMobile={isMobile} C={C}/></div>}
           {activeTab==="admin"&&isAdmin&&<div style={{flex:1,overflowY:"auto"}}><AdminPanel session={session} onLogout={handleLogout} C={C}/></div>}
         </div>
 
